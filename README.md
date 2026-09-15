@@ -38,8 +38,11 @@ npm run build
 ## Use it
 1. Open any page with text, e.g. [Romeo and Juliet](https://shakespeare.mit.edu/romeo_juliet/full.html)
 2. Press **Alt+G** (or click the coreText icon)
-3. Type what you are looking for and press **Enter**
-4. Use **↑ / ↓** to jump between matches
+3. Select your preferred order:
+   - **Appearance**: Results ordered from top to bottom as they appear on the page (Ctrl+F style)
+   - **Importance**: Results ordered by semantic relevance (best match first)
+4. Type what you are looking for and press **Enter**
+5. Use **↑ / ↓** to jump between matches, or click any card in the results list to jump directly to it
 
 ## After changing code
 Run `npm run build` again, then click **↻ Reload** on the extension in `chrome://extensions`.
