@@ -44,6 +44,8 @@ npm run build
 4. Type what you are looking for and press **Enter**
 5. Use **↑ / ↓** to jump between matches, or click any card in the results list to jump directly to it
 
+You can also ask a question, e.g. `who kills Tybalt?`: coreText highlights the passage that answers it.
+
 ## After changing code
 Run `npm run build` again, then click **↻ Reload** on the extension in `chrome://extensions`.
 

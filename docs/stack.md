@@ -70,7 +70,7 @@ All Gemini requests go through `extension/src/gemini.ts`. Pass a system prompt, 
 import { askGeminiJson } from "./gemini.js";
 
 const { citations } = await askGeminiJson<{ citations: string[] }>({
-  system: SYSTEM_PROMPT,                 // verbatim quotes only, max 5, [] if nothing
+  system: SYSTEM_PROMPT,                 // verbatim quotes only, all relevant (max 50), [] if nothing
   user: `Search query: ${query}\n\nPage text:\n<<<\n${pageText}\n>>>`,
   schema: {
     type: "object",
@@ -88,6 +88,24 @@ Tested on the full text of Romeo and Juliet (~170k chars), ~2–3 s per query:
 - "romeo dies" → "Thy drugs are quick. Thus with a kiss I die."
 - a Ukrainian query "Juliet wakes up in the tomb" → the scene where Juliet wakes
 - "how to bake a cake" → no citations → "Not found on this page."
+
+## Number of results
+There is no setting: Gemini returns every relevant passage, best first, up to `MAX_CITATIONS = 50` (`semanticSearch.ts`).
+The limit is a cap, not a target: the model never pads the list.
+On Romeo and Juliet "romeo dies" returns about 13 passages, "how to bake a cake" returns none.
+
+Questions are detected by the model (any language, with or without "?") and answered with passages that contain the answer, not passages that repeat the question's words:
+- "who kills Tybalt?" → "Romeo slew Tybalt, Romeo must not live."
+- "where does Romeo buy the poison?" → "SCENE I. Mantua. A street." and "he did buy a poison Of a poor 'pothecary"
+- "what is the capital of France?" → not found (the model must not answer from its own knowledge)
+
+## Order: Appearance / Importance
+Gemini always returns citations best first. The page script keeps that index and sorts the matches:
+- **Appearance**: top to bottom, like Ctrl+F.
+- **Importance**: best match first.
+
+Switching the order calls `reorderPageMatches` in the page: no new Gemini request.
+The order is saved in the popup's `localStorage`.
 
 ## Why tolerant matching
 Even with a strict prompt, an LLM can change a quote a little: whitespace, line breaks, quote marks, dashes, a skipped line. An exact search would then find nothing. So the page script:
