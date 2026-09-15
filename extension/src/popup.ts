@@ -187,7 +187,7 @@ async function searchActivePage(rawQuery: string): Promise<void> {
       return;
     }
 
-    const citations = await findCitations(query, pageText, currentOrder);
+    const citations = await findCitations(query, pageText);
     if (search !== latestSearch) return;
 
     const { found, missing, citationsInOrder } = await runInPage(tabId, highlightCitations, [
