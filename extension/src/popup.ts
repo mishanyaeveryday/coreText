@@ -5,7 +5,8 @@ import {
   reorderPageMatches,
   setActiveMatch,
 } from "./pageScripts.js";
-import { MAX_PAGE_CHARS, SearchOrder, findCitations } from "./semanticSearch.js";
+import { deleteUnusedStores } from "./fileSearch.js";
+import { MAX_FILE_SEARCH_CHARS, SearchOrder, SearchStage, findCitations } from "./semanticSearch.js";
 import {
   clearYoutubeMoments,
   fetchYoutubeTranscript,
@@ -16,6 +17,11 @@ import {
 import { findMomentIndices } from "./youtubeSearch.js";
 
 type Mode = "page" | "youtube";
+
+const STAGE_MESSAGES: Record<SearchStage, string> = {
+  indexing: "Long page: indexing it with Gemini File Search (about 30 s, only the first search)…",
+  searching: "Searching the indexed page…",
+};
 
 const input = document.querySelector<HTMLInputElement>("#search")!;
 const clearBtn = document.querySelector<HTMLButtonElement>("#clear-btn")!;
@@ -74,11 +80,13 @@ function updateCount(): void {
   updateActiveItemInList();
 }
 
-function setStatus(message: string, isError = true): void {
+/** `info` is for progress messages; `success`/`error` style the final result. */
+function setStatus(message: string, kind: "error" | "success" | "info" = "error"): void {
   status.textContent = message;
   status.style.display = message ? "block" : "none";
-  status.classList.toggle("status-error", isError && !!message);
-  status.classList.toggle("status-success", !isError && !!message);
+  status.classList.toggle("status-error", kind === "error" && !!message);
+  status.classList.toggle("status-success", kind === "success" && !!message);
+  status.classList.toggle("info", kind === "info" && !!message);
 }
 
 function setSearching(isSearching: boolean): void {
@@ -259,14 +267,20 @@ async function searchActivePage(rawQuery: string): Promise<void> {
     await runInPage(tabId, clearHighlights, []);
     if (!query) return;
 
-    const pageText = await runInPage(tabId, getPageText, [MAX_PAGE_CHARS]);
+    const pageText = await runInPage(tabId, getPageText, [MAX_FILE_SEARCH_CHARS]);
     if (!pageText.trim()) {
       setStatus("This page has no text.");
       return;
     }
 
-    const citations = await findCitations(query, pageText, currentOrder);
+    const citations = await findCitations(query, pageText, {
+      tabId,
+      onStage: (stage) => {
+        if (search === latestSearch) setStatus(STAGE_MESSAGES[stage], "info");
+      },
+    });
     if (search !== latestSearch) return;
+    setStatus("");
 
     const { found, missing, citationsInOrder } = await runInPage(tabId, highlightCitations, [
       citations,
@@ -389,3 +403,8 @@ void getActiveTab().then((tab) => {
 
 updateOrderButtons();
 updateCount();
+
+// Remove File Search stores that no open tab uses anymore.
+deleteUnusedStores().catch((error) => {
+  console.warn("coreText: could not clean up File Search stores", error);
+});
