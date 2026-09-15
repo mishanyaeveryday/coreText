@@ -1,6 +1,7 @@
 export {};
 
 const input = document.querySelector<HTMLInputElement>("#search")!;
+const count = document.querySelector<HTMLSpanElement>("#count")!;
 const prevButton = document.querySelector<HTMLButtonElement>("#prev")!;
 const nextButton = document.querySelector<HTMLButtonElement>("#next")!;
 const status = document.querySelector<HTMLParagraphElement>("#status")!;
@@ -35,7 +36,7 @@ function highlightMatches(query: string): number {
   }
 
   const lowerQuery = query.toLowerCase();
-  let count = 0;
+  let matchCount = 0;
 
   for (const textNode of textNodes) {
     const text = textNode.textContent ?? "";
@@ -51,7 +52,7 @@ function highlightMatches(query: string): number {
       mark.className = markClass;
       mark.textContent = text.slice(index, index + query.length);
       fragment.appendChild(mark);
-      count++;
+      matchCount++;
       lastIndex = index + query.length;
       index = lowerText.indexOf(lowerQuery, lastIndex);
     }
@@ -59,7 +60,7 @@ function highlightMatches(query: string): number {
     textNode.parentNode?.replaceChild(fragment, textNode);
   }
 
-  return count;
+  return matchCount;
 }
 
 function setActiveMatch(index: number): number {
@@ -82,11 +83,22 @@ function setActiveMatch(index: number): number {
 let matchCount = 0;
 let currentIndex = -1;
 
+function updateCount(): void {
+  count.textContent = matchCount > 0 ? `${currentIndex + 1}/${matchCount}` : input.value ? "0/0" : "";
+  prevButton.disabled = matchCount === 0;
+  nextButton.disabled = matchCount === 0;
+}
+
+function setStatus(message: string): void {
+  status.textContent = message;
+  status.hidden = message === "";
+}
+
 async function searchActivePage(query: string): Promise<void> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
   if (tab?.id === undefined) {
-    status.textContent = "No active tab.";
+    setStatus("No active tab.");
     return;
   }
 
@@ -98,16 +110,18 @@ async function searchActivePage(query: string): Promise<void> {
     });
     matchCount = result?.result ?? 0;
     currentIndex = -1;
+    setStatus("");
 
     if (matchCount > 0) {
       await goToMatch(tab.id, 0);
     } else {
-      status.textContent = query ? "0 matches" : "";
+      updateCount();
     }
   } catch (error) {
     matchCount = 0;
     currentIndex = -1;
-    status.textContent = error instanceof Error ? error.message : "Could not read this page.";
+    updateCount();
+    setStatus(error instanceof Error ? error.message : "Could not read this page.");
   }
 }
 
@@ -118,7 +132,13 @@ async function goToMatch(tabId: number, index: number): Promise<void> {
     args: [index],
   });
   currentIndex = result?.result ?? -1;
-  status.textContent = matchCount > 0 ? `${currentIndex + 1} / ${matchCount}` : "0 matches";
+  updateCount();
+}
+
+async function withActiveTab(callback: (tabId: number) => Promise<void>): Promise<void> {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id === undefined) return;
+  await callback(tab.id);
 }
 
 input.addEventListener("keydown", (event) => {
@@ -137,12 +157,6 @@ input.addEventListener("keydown", (event) => {
     void withActiveTab((tabId) => goToMatch(tabId, currentIndex - 1));
   }
 });
-
-async function withActiveTab(callback: (tabId: number) => Promise<void>): Promise<void> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tab?.id === undefined) return;
-  await callback(tab.id);
-}
 
 prevButton.addEventListener("click", () => {
   if (matchCount === 0) return;
@@ -173,3 +187,5 @@ if (document.hasFocus()) {
   // rejects with NotAllowedError. Retry once focus actually lands.
   window.addEventListener("focus", pasteFromClipboard, { once: true });
 }
+
+updateCount();
