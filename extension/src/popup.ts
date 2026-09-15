@@ -6,6 +6,16 @@ import {
   setActiveMatch,
 } from "./pageScripts.js";
 import { MAX_PAGE_CHARS, SearchOrder, findCitations } from "./semanticSearch.js";
+import {
+  clearYoutubeMoments,
+  fetchYoutubeTranscript,
+  reorderYoutubeMoments,
+  setActiveYoutubeMoment,
+  setYoutubeMoments,
+} from "./youtubeScripts.js";
+import { findMomentIndices } from "./youtubeSearch.js";
+
+type Mode = "page" | "youtube";
 
 const input = document.querySelector<HTMLInputElement>("#search")!;
 const clearBtn = document.querySelector<HTMLButtonElement>("#clear-btn")!;
@@ -23,6 +33,7 @@ const resultsList = document.querySelector<HTMLUListElement>("#results-list")!;
 
 let currentOrder: SearchOrder =
   (localStorage.getItem("coretext_search_order") as SearchOrder) || "appearance";
+let currentMode: Mode = "page";
 let matchCount = 0;
 let currentIndex = -1;
 let currentCitations: string[] = [];
@@ -63,9 +74,11 @@ function updateCount(): void {
   updateActiveItemInList();
 }
 
-function setStatus(message: string): void {
+function setStatus(message: string, isError = true): void {
   status.textContent = message;
   status.style.display = message ? "block" : "none";
+  status.classList.toggle("status-error", isError && !!message);
+  status.classList.toggle("status-success", !isError && !!message);
 }
 
 function setSearching(isSearching: boolean): void {
@@ -83,9 +96,33 @@ async function runInPage<Args extends unknown[], Result>(
   return injection?.result as Result;
 }
 
-async function getActiveTabId(): Promise<number | undefined> {
+async function getActiveTab(): Promise<chrome.tabs.Tab | undefined> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tab?.id;
+  return tab;
+}
+
+async function getActiveTabId(): Promise<number | undefined> {
+  return (await getActiveTab())?.id;
+}
+
+function isYoutubeWatchUrl(url?: string): boolean {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return /(^|\.)youtube\.com$/.test(parsed.hostname) && parsed.pathname === "/watch" && parsed.searchParams.has("v");
+  } catch {
+    return false;
+  }
+}
+
+function formatTime(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const mm = h > 0 ? String(m).padStart(2, "0") : String(m);
+  const ss = String(s).padStart(2, "0");
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
 function renderResultsList(tabId?: number): void {
@@ -148,12 +185,20 @@ async function switchOrder(newOrder: SearchOrder): Promise<void> {
   if (matchCount > 0) {
     const tabId = await getActiveTabId();
     if (tabId !== undefined) {
-      const result = await runInPage(tabId, reorderPageMatches, [currentOrder]);
-      if (result && result.citationsInOrder) {
-        currentCitations = result.citationsInOrder;
+      if (currentMode === "youtube") {
+        const result = await runInPage(tabId, reorderYoutubeMoments, [currentOrder]);
+        currentCitations = result.moments.map((m) => `${formatTime(m.start)} — ${m.text}`);
         matchCount = result.found;
         renderResultsList(tabId);
         await goToMatch(tabId, 0);
+      } else {
+        const result = await runInPage(tabId, reorderPageMatches, [currentOrder]);
+        if (result && result.citationsInOrder) {
+          currentCitations = result.citationsInOrder;
+          matchCount = result.found;
+          renderResultsList(tabId);
+          await goToMatch(tabId, 0);
+        }
       }
     }
   }
@@ -162,13 +207,15 @@ async function switchOrder(newOrder: SearchOrder): Promise<void> {
 async function searchActivePage(rawQuery: string): Promise<void> {
   const search = ++latestSearch;
   const query = rawQuery.trim();
-  const tabId = await getActiveTabId();
+  const tab = await getActiveTab();
+  const tabId = tab?.id;
 
   if (tabId === undefined) {
     setStatus("No active tab.");
     return;
   }
 
+  currentMode = isYoutubeWatchUrl(tab?.url) ? "youtube" : "page";
   matchCount = 0;
   currentIndex = -1;
   currentCitations = [];
@@ -178,6 +225,37 @@ async function searchActivePage(rawQuery: string): Promise<void> {
   renderResultsList();
 
   try {
+    if (currentMode === "youtube") {
+      if (!query) return;
+
+      const segments = await runInPage(tabId, fetchYoutubeTranscript, []);
+      if (search !== latestSearch) return;
+      if (!segments || segments.length === 0) {
+        setStatus("This video has no transcript available.");
+        return;
+      }
+
+      const indices = await findMomentIndices(query, segments, currentOrder);
+      if (search !== latestSearch) return;
+
+      const chosenSegments = indices.map((i) => segments[i]);
+      const { found, moments } = await runInPage(tabId, setYoutubeMoments, [chosenSegments, currentOrder]);
+
+      matchCount = found;
+      currentCitations = moments.map((m) => `${formatTime(m.start)} — ${m.text}`);
+      setSearching(false);
+
+      if (found === 0) {
+        setStatus("Not found in this video.");
+        renderResultsList();
+        return;
+      }
+
+      renderResultsList(tabId);
+      await goToMatch(tabId, 0);
+      return;
+    }
+
     await runInPage(tabId, clearHighlights, []);
     if (!query) return;
 
@@ -217,7 +295,7 @@ async function searchActivePage(rawQuery: string): Promise<void> {
     currentCitations = [];
     renderResultsList();
     // Chrome blocks injection on chrome:// pages and the Web Store.
-    setStatus(error instanceof Error ? error.message : "Could not search this page.");
+    setStatus(error instanceof Error ? error.message : `Could not search this ${currentMode === "youtube" ? "video" : "page"}.`);
   } finally {
     if (search === latestSearch) {
       setSearching(false);
@@ -226,7 +304,7 @@ async function searchActivePage(rawQuery: string): Promise<void> {
 }
 
 async function goToMatch(tabId: number, index: number): Promise<void> {
-  currentIndex = await runInPage(tabId, setActiveMatch, [index]);
+  currentIndex = await runInPage(tabId, currentMode === "youtube" ? setActiveYoutubeMoment : setActiveMatch, [index]);
   updateCount();
 }
 
@@ -247,7 +325,7 @@ function clearSearch(): void {
   updateCount();
   renderResultsList();
   void getActiveTabId().then((tabId) => {
-    if (tabId !== undefined) void runInPage(tabId, clearHighlights, []);
+    if (tabId !== undefined) void runInPage(tabId, currentMode === "youtube" ? clearYoutubeMoments : clearHighlights, []);
   });
   input.focus();
 }
@@ -302,6 +380,12 @@ if (document.hasFocus()) {
   // rejects with NotAllowedError. Retry once focus actually lands.
   window.addEventListener("focus", pasteFromClipboard, { once: true });
 }
+
+void getActiveTab().then((tab) => {
+  if (isYoutubeWatchUrl(tab?.url)) {
+    input.placeholder = "Find a moment in this video...";
+  }
+});
 
 updateOrderButtons();
 updateCount();
