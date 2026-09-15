@@ -46,6 +46,8 @@ npm run build
 
 You can also ask a question, e.g. `who kills Tybalt?`: coreText highlights the passage that answers it.
 
+Very long pages (over 400,000 characters, e.g. [Moby Dick](https://www.gutenberg.org/cache/epub/2701/pg2701-images.html)) are searched with Gemini File Search. The first search on such a page also indexes it, which adds up to ~30 seconds; later searches on the same tab reuse the index. Keep the popup open while it searches. The index is deleted from Gemini when you close the tab.
+
 ## After changing code
 Run `npm run build` again, then click **↻ Reload** on the extension in `chrome://extensions`.
 

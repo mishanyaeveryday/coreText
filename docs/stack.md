@@ -107,6 +107,31 @@ Gemini always returns citations best first. The page script keeps that index and
 Switching the order calls `reorderPageMatches` in the page: no new Gemini request.
 The order is saved in the popup's `localStorage`.
 
+## Large pages: Gemini File Search
+Pages longer than `MAX_PAGE_CHARS` (400k chars) don't go into the prompt. `extension/src/fileSearch.ts` instead:
+1. hashes the page text (SHA-256) and looks for an index of this tab in `chrome.storage.session`;
+2. if there is none, or the page text changed: creates a File Search store (`coretext-temp-<timestamp>`), uploads the text straight from memory (resumable upload, 200-token chunks) and waits until it is indexed;
+3. runs the query through `/v1beta/interactions` with the `file_search` tool (at most 3 searches, `thinking_level: low`) and the same JSON schema (`citations`).
+
+The citations then go through the same `highlightCitations` as small pages.
+
+**The index lives as long as the tab.** Repeated searches on the same page skip indexing: no waiting for it and no extra indexing tokens.
+The store is deleted when:
+- the tab is closed (`background.ts`, `chrome.tabs.onRemoved`);
+- the page text changes (the next search re-indexes and deletes the old store);
+- indexing or the search fails;
+- the browser starts again, or the popup opens, and a coreText store is not used by any open tab and is older than 15 min (`deleteUnusedStores`).
+
+Privacy: nothing is written to disk. The tab → store mapping is in `chrome.storage.session` (memory, cleared when the browser closes); the page text only lives in Gemini while its tab is open.
+
+Timing (Sherlock Holmes, 584k chars): first search ~35 s (indexing ~5 s + query), next searches on the same page skip indexing; the query itself takes 10–30 s depending on how many file searches the model runs. For 1.4M chars (Moby Dick) indexing takes ~25 s. Closing the popup cancels a search in progress (the index is kept).
+
+Tested:
+- Moby Dick: "how does captain ahab die" → "Ahab stooped to clear it; … the flying turn caught him round the neck…"
+- Sherlock Holmes, same tab: 1st search indexed, 2nd search reused the store, changed text → re-indexed and the old store was deleted, tab closed → no stores left
+
+Good pages to try: [Moby Dick](https://www.gutenberg.org/cache/epub/2701/pg2701-images.html), [War and Peace](https://www.gutenberg.org/cache/epub/2600/pg2600-images.html), [ECMAScript spec](https://tc39.es/ecma262/).
+
 ## Why tolerant matching
 Even with a strict prompt, an LLM can change a quote a little: whitespace, line breaks, quote marks, dashes, a skipped line. An exact search would then find nothing. So the page script:
 1. builds one normalized string from all text nodes (no whitespace, lowercase, unified quotes/dashes) with a map back to each node and offset;
@@ -119,7 +144,7 @@ Even with a strict prompt, an LLM can change a quote a little: whitespace, line 
 - Fine for the MVP. For production: a thin proxy server that holds the key.
 
 ## Notes
-- Page text is capped at 400k chars (`MAX_PAGE_CHARS`).
+- Pages up to 400k chars go into the prompt (`MAX_PAGE_CHARS`); longer ones use File Search, capped at 20M chars (`MAX_FILE_SEARCH_CHARS`).
 - The Gemini request runs in the popup: closing the popup cancels a search in progress.
 - Citations that could not be located are logged with `console.warn` in the popup DevTools.
 - Highlight with the CSS Custom Highlight API (does not change the DOM).
