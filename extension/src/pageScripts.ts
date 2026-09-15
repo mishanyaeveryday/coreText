@@ -2,7 +2,17 @@
 // Chrome serializes each function on its own, so every function must be
 // self-contained: no imports and no helpers defined outside its body.
 
-type PageWindow = Window & { __coretextRanges?: Range[] };
+type CoretextMatch = {
+  citation: string;
+  startOffset: number;
+  importanceIndex: number;
+  range: Range;
+};
+
+type PageWindow = Window & {
+  __coretextRanges?: Range[];
+  __coretextMatches?: CoretextMatch[];
+};
 
 export function getPageText(maxLength: number): string {
   return (document.body?.innerText ?? "").slice(0, maxLength);
@@ -14,7 +24,10 @@ export function getPageText(maxLength: number): string {
  * between Gemini's quote and the DOM still match. If a citation is not found,
  * shorter pieces of it are tried before giving up.
  */
-export function highlightCitations(citations: string[]): { found: number; missing: string[] } {
+export function highlightCitations(
+  citations: string[],
+  order: "appearance" | "importance" = "appearance",
+): { found: number; missing: string[]; citationsInOrder: string[] } {
   const MATCH = "coretext-match";
   const ACTIVE = "coretext-active";
   const STYLE_ID = "coretext-highlight-style";
@@ -94,10 +107,16 @@ export function highlightCitations(citations: string[]): { found: number; missin
     return null;
   };
 
-  const ranges: Range[] = [];
+  const matches: Array<{
+    citation: string;
+    startOffset: number;
+    importanceIndex: number;
+    range: Range;
+  }> = [];
   const missing: string[] = [];
 
-  for (const citation of citations) {
+  for (let i = 0; i < citations.length; i++) {
+    const citation = citations[i];
     const match = locate(citation);
     if (!match) {
       missing.push(citation);
@@ -110,14 +129,71 @@ export function highlightCitations(citations: string[]): { found: number; missin
     const range = document.createRange();
     range.setStart(nodes[nodeIndexes[start]], offsets[start]);
     range.setEnd(nodes[nodeIndexes[end]], offsets[end] + 1);
-    ranges.push(range);
+
+    matches.push({
+      citation,
+      startOffset: start,
+      importanceIndex: i,
+      range,
+    });
   }
+
+  if (order === "appearance") {
+    matches.sort((a, b) => a.startOffset - b.startOffset);
+  } else {
+    matches.sort((a, b) => a.importanceIndex - b.importanceIndex);
+  }
+
+  const ranges = matches.map((m) => m.range);
 
   CSS.highlights.delete(ACTIVE);
   CSS.highlights.set(MATCH, new Highlight(...ranges));
   (window as PageWindow).__coretextRanges = ranges;
+  (window as PageWindow).__coretextMatches = matches;
 
-  return { found: ranges.length, missing };
+  return {
+    found: ranges.length,
+    missing,
+    citationsInOrder: matches.map((m) => m.citation),
+  };
+}
+
+/** Reorders existing page highlights without re-scanning or calling Gemini. */
+export function reorderPageMatches(order: "appearance" | "importance"): {
+  found: number;
+  citationsInOrder: string[];
+} {
+  const MATCH = "coretext-match";
+  type CoretextMatch = {
+    citation: string;
+    startOffset: number;
+    importanceIndex: number;
+    range: Range;
+  };
+  type PageWindow = Window & {
+    __coretextRanges?: Range[];
+    __coretextMatches?: CoretextMatch[];
+  };
+
+  const win = window as PageWindow;
+  const matches = win.__coretextMatches ?? [];
+  if (matches.length === 0) {
+    return { found: 0, citationsInOrder: [] };
+  }
+
+  if (order === "appearance") {
+    matches.sort((a, b) => a.startOffset - b.startOffset);
+  } else {
+    matches.sort((a, b) => a.importanceIndex - b.importanceIndex);
+  }
+
+  win.__coretextRanges = matches.map((m) => m.range);
+  CSS.highlights.set(MATCH, new Highlight(...win.__coretextRanges));
+
+  return {
+    found: matches.length,
+    citationsInOrder: matches.map((m) => m.citation),
+  };
 }
 
 /** Marks match number `index` as active and scrolls to it. Returns the clamped index. */
@@ -141,4 +217,5 @@ export function clearHighlights(): void {
   CSS.highlights.delete("coretext-match");
   CSS.highlights.delete("coretext-active");
   (window as PageWindow).__coretextRanges = [];
+  (window as PageWindow).__coretextMatches = [];
 }

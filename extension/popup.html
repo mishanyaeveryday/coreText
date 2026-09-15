@@ -7,94 +7,421 @@
   <style>
     * {
       box-sizing: border-box;
+      margin: 0;
+      padding: 0;
     }
 
     body {
-      margin: 0;
-      display: inline-block;
-      background: #fff;
-      font: 13px Arial, sans-serif;
+      width: 350px;
+      background: #ffffff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 13px;
+      color: #1f2937;
+      user-select: none;
+      -webkit-font-smoothing: antialiased;
       overflow: hidden;
     }
 
-    .bar {
+    .app-container {
+      display: flex;
+      flex-direction: column;
+      background: #ffffff;
+    }
+
+    /* Main Search Bar */
+    .search-bar {
+      display: flex;
+      align-items: center;
+      padding: 8px 10px;
+      background: #ffffff;
+      gap: 6px;
+      border-bottom: 1px solid #f1f3f5;
+    }
+
+    .search-icon {
+      color: #4f46e5;
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 6px 4px 6px 12px;
-      gap: 2px;
-      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .input-wrapper {
+      position: relative;
+      flex: 1;
+      display: flex;
+      align-items: center;
     }
 
     #search {
+      width: 100%;
       border: none;
       outline: none;
-      font: inherit;
-      color: inherit;
+      font-size: 13px;
+      font-family: inherit;
+      color: #111827;
       background: transparent;
-      width: 160px;
+      padding-right: 20px;
+    }
+
+    #search::placeholder {
+      color: #9ca3af;
+    }
+
+    #clear-btn {
+      position: absolute;
+      right: 0;
+      border: none;
+      background: transparent;
+      color: #9ca3af;
+      cursor: pointer;
+      font-size: 11px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+    }
+
+    #clear-btn:hover {
+      color: #4b5563;
+      background: #f3f4f6;
     }
 
     #count {
-      color: #5f6368;
-      padding: 0 8px;
-      min-width: 1ch;
-      width: fit-content;
+      font-size: 11px;
+      font-weight: 600;
+      color: #6b7280;
+      padding: 2px 7px;
+      border-radius: 10px;
+      background: #f3f4f6;
+      white-space: nowrap;
+      min-width: 24px;
+      text-align: center;
+      display: inline-block;
     }
 
     .divider {
       width: 1px;
-      height: 20px;
-      background: #e0e0e0;
-      margin: 0 4px;
+      height: 18px;
+      background: #e5e7eb;
+      margin: 0 2px;
       flex-shrink: 0;
     }
 
+    .nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+    }
+
     .icon-btn {
-      width: 28px;
-      height: 28px;
+      width: 26px;
+      height: 26px;
       flex-shrink: 0;
       border: none;
       background: transparent;
-      border-radius: 50%;
+      border-radius: 6px;
       display: flex;
       align-items: center;
       justify-content: center;
       cursor: pointer;
-      color: #5f6368;
-      font-size: 13px;
-      line-height: 1;
+      color: #4b5563;
       padding: 0;
+      transition: background 0.15s, color 0.15s;
     }
 
-    .icon-btn:hover {
-      background: #f1f3f4;
+    .icon-btn:hover:not(:disabled) {
+      background: #f3f4f6;
+      color: #111827;
     }
 
     .icon-btn:disabled {
-      color: #c6c6c6;
+      color: #d1d5db;
       cursor: default;
-      background: none;
     }
 
-    #status {
-      margin: 0;
-      padding: 0 12px 6px;
+    /* Options Bar / Segmented Control */
+    .options-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 10px;
+      background: #f9fafb;
+      border-bottom: 1px solid #f1f3f5;
+    }
+
+    .options-title {
       font-size: 11px;
-      color: #d93025;
+      font-weight: 600;
+      color: #6b7280;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+    }
+
+    .segmented-control {
+      display: inline-flex;
+      background: #e5e7eb;
+      border-radius: 6px;
+      padding: 2px;
+      gap: 2px;
+    }
+
+    .segment-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      border: none;
+      background: transparent;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 500;
+      color: #4b5563;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      line-height: 14px;
+    }
+
+    .segment-btn svg {
+      width: 12px;
+      height: 12px;
+      opacity: 0.7;
+    }
+
+    .segment-btn.active {
+      background: #ffffff;
+      color: #1f2937;
+      font-weight: 600;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+    }
+
+    .segment-btn.active svg {
+      opacity: 1;
+      color: #4f46e5;
+    }
+
+    .segment-btn:hover:not(.active) {
+      color: #111827;
+    }
+
+    /* Loading Bar */
+    .loader-bar {
+      height: 2px;
+      width: 100%;
+      background: #e0e7ff;
+      overflow: hidden;
+      position: relative;
+      display: none;
+    }
+
+    .loader-bar::after {
+      content: "";
+      position: absolute;
+      left: -40%;
+      height: 100%;
+      width: 40%;
+      background: #4f46e5;
+      animation: loading-slide 1s infinite linear;
+    }
+
+    @keyframes loading-slide {
+      0% {
+        left: -40%;
+      }
+      100% {
+        left: 100%;
+      }
+    }
+
+    /* Status Message */
+    #status {
+      padding: 8px 12px;
+      font-size: 11px;
+      color: #dc2626;
+      background: #fef2f2;
+      border-bottom: 1px solid #fee2e2;
+      display: none;
+    }
+
+    /* Results Output Container */
+    #results-container {
+      display: none;
+      flex-direction: column;
+      background: #ffffff;
+    }
+
+    .results-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 10px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #9ca3af;
+      border-bottom: 1px solid #f3f4f6;
+    }
+
+    .results-list {
+      list-style: none;
+      overflow-y: auto;
+      max-height: 230px;
+      padding: 6px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .results-list::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    .results-list::-webkit-scrollbar-thumb {
+      background: #e5e7eb;
+      border-radius: 4px;
+    }
+
+    .result-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 7px 9px;
+      border-radius: 6px;
+      background: #f9fafb;
+      border: 1px solid #f3f4f6;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+
+    .result-item:hover {
+      background: #f3f4f6;
+      border-color: #e5e7eb;
+    }
+
+    .result-item.active {
+      background: #fffbeb;
+      border-color: #f59e0b;
+      box-shadow: 0 1px 3px rgba(245, 158, 11, 0.15);
+    }
+
+    .result-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 700;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #e5e7eb;
+      color: #4b5563;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .result-item.active .result-badge {
+      background: #f59e0b;
+      color: #ffffff;
+    }
+
+    .result-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .result-tag {
+      font-size: 9px;
+      font-weight: 700;
+      color: #d97706;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+
+    .result-snippet {
+      font-size: 12px;
+      line-height: 1.4;
+      color: #374151;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      word-break: break-word;
+    }
+
+    .result-item.active .result-snippet {
+      color: #111827;
+      font-weight: 500;
     }
   </style>
 </head>
 
 <body>
-  <div class="bar">
-    <input id="search" type="text" placeholder="Find" />
-    <span id="count"></span>
-    <div class="divider"></div>
-    <button id="prev" class="icon-btn" type="button" title="Previous match">&#9650;</button>
-    <button id="next" class="icon-btn" type="button" title="Next match">&#9660;</button>
+  <div class="app-container">
+    <div class="search-bar">
+      <div class="search-icon" title="Semantic Ctrl+F">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+      </div>
+      <div class="input-wrapper">
+        <input id="search" type="text" placeholder="Find by meaning..." autocomplete="off" spellcheck="false" />
+        <button id="clear-btn" type="button" title="Clear search">✕</button>
+      </div>
+      <span id="count"></span>
+      <div class="divider"></div>
+      <div class="nav-actions">
+        <button id="prev" class="icon-btn" type="button" title="Previous match (↑)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="18 15 12 9 6 15"></polyline>
+          </svg>
+        </button>
+        <button id="next" class="icon-btn" type="button" title="Next match (↓)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="options-bar">
+      <span class="options-title">Order</span>
+      <div class="segmented-control" role="radiogroup" aria-label="Result ordering">
+        <button id="order-appearance" class="segment-btn active" type="button" role="radio" aria-checked="true" title="Order matches by their appearance on the page (top to bottom)">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="12" x2="16" y2="12"></line>
+            <line x1="3" y1="18" x2="10" y2="18"></line>
+          </svg>
+          <span>Appearance</span>
+        </button>
+        <button id="order-importance" class="segment-btn" type="button" role="radio" aria-checked="false" title="Order matches by semantic importance (best match first)">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+          </svg>
+          <span>Importance</span>
+        </button>
+      </div>
+    </div>
+
+    <div id="loader" class="loader-bar"></div>
+    <p id="status"></p>
+
+    <div id="results-container">
+      <div class="results-header">
+        <span id="results-header-title">Matches</span>
+        <span id="results-header-mode">Appearance order</span>
+      </div>
+      <ul id="results-list" class="results-list"></ul>
+    </div>
   </div>
-  <p id="status" hidden></p>
   <script type="module" src="dist/popup.js"></script>
 </body>
 
