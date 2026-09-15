@@ -1,4 +1,5 @@
-export {};
+import { clearHighlights, getPageText, highlightCitations, setActiveMatch } from "./pageScripts.js";
+import { MAX_PAGE_CHARS, findCitations } from "./semanticSearch.js";
 
 const input = document.querySelector<HTMLInputElement>("#search")!;
 const count = document.querySelector<HTMLSpanElement>("#count")!;
@@ -6,85 +7,18 @@ const prevButton = document.querySelector<HTMLButtonElement>("#prev")!;
 const nextButton = document.querySelector<HTMLButtonElement>("#next")!;
 const status = document.querySelector<HTMLParagraphElement>("#status")!;
 
-function highlightMatches(query: string): number {
-  const markClass = "__coretext_highlight__";
-
-  document.querySelectorAll(`mark.${markClass}`).forEach((mark) => {
-    const parent = mark.parentNode;
-    if (!parent) return;
-    parent.replaceChild(document.createTextNode(mark.textContent ?? ""), mark);
-    parent.normalize();
-  });
-
-  if (!query) return 0;
-
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
-    acceptNode(node) {
-      const parent = node.parentElement;
-      if (!parent) return NodeFilter.FILTER_REJECT;
-      if (["SCRIPT", "STYLE", "MARK"].includes(parent.tagName)) {
-        return NodeFilter.FILTER_REJECT;
-      }
-      return NodeFilter.FILTER_ACCEPT;
-    },
-  });
-
-  const textNodes: Text[] = [];
-  let node: Node | null;
-  while ((node = walker.nextNode())) {
-    textNodes.push(node as Text);
-  }
-
-  const lowerQuery = query.toLowerCase();
-  let matchCount = 0;
-
-  for (const textNode of textNodes) {
-    const text = textNode.textContent ?? "";
-    const lowerText = text.toLowerCase();
-    let index = lowerText.indexOf(lowerQuery);
-    if (index === -1) continue;
-
-    const fragment = document.createDocumentFragment();
-    let lastIndex = 0;
-    while (index !== -1) {
-      fragment.appendChild(document.createTextNode(text.slice(lastIndex, index)));
-      const mark = document.createElement("mark");
-      mark.className = markClass;
-      mark.textContent = text.slice(index, index + query.length);
-      fragment.appendChild(mark);
-      matchCount++;
-      lastIndex = index + query.length;
-      index = lowerText.indexOf(lowerQuery, lastIndex);
-    }
-    fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
-    textNode.parentNode?.replaceChild(fragment, textNode);
-  }
-
-  return matchCount;
-}
-
-function setActiveMatch(index: number): number {
-  const markClass = "__coretext_highlight__";
-  const marks = Array.from(document.querySelectorAll<HTMLElement>(`mark.${markClass}`));
-  if (marks.length === 0) return -1;
-
-  marks.forEach((mark) => {
-    mark.style.backgroundColor = "";
-  });
-
-  const clamped = ((index % marks.length) + marks.length) % marks.length;
-  const active = marks[clamped];
-  active.style.backgroundColor = "orange";
-  active.scrollIntoView({ behavior: "smooth", block: "center" });
-
-  return clamped;
-}
-
 let matchCount = 0;
 let currentIndex = -1;
+let searching = false;
+// Ignores results of an older search when the user starts a new one.
+let latestSearch = 0;
 
 function updateCount(): void {
-  count.textContent = matchCount > 0 ? `${currentIndex + 1}/${matchCount}` : input.value ? "0/0" : "";
+  if (searching) {
+    count.textContent = "…";
+  } else {
+    count.textContent = matchCount > 0 ? `${currentIndex + 1}/${matchCount}` : input.value ? "0/0" : "";
+  }
   prevButton.disabled = matchCount === 0;
   nextButton.disabled = matchCount === 0;
 }
@@ -94,79 +28,99 @@ function setStatus(message: string): void {
   status.hidden = message === "";
 }
 
-async function searchActivePage(query: string): Promise<void> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+async function runInPage<Args extends unknown[], Result>(
+  tabId: number,
+  func: (...args: Args) => Result,
+  args: Args,
+): Promise<Result> {
+  const [injection] = await chrome.scripting.executeScript({ target: { tabId }, func, args });
+  return injection?.result as Result;
+}
 
-  if (tab?.id === undefined) {
+async function getActiveTabId(): Promise<number | undefined> {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab?.id;
+}
+
+async function searchActivePage(rawQuery: string): Promise<void> {
+  const search = ++latestSearch;
+  const query = rawQuery.trim();
+  const tabId = await getActiveTabId();
+
+  if (tabId === undefined) {
     setStatus("No active tab.");
     return;
   }
 
-  try {
-    const [result] = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: highlightMatches,
-      args: [query],
-    });
-    matchCount = result?.result ?? 0;
-    currentIndex = -1;
-    setStatus("");
+  matchCount = 0;
+  currentIndex = -1;
+  searching = query !== "";
+  setStatus("");
+  updateCount();
 
-    if (matchCount > 0) {
-      await goToMatch(tab.id, 0);
-    } else {
+  try {
+    await runInPage(tabId, clearHighlights, []);
+    if (!query) return;
+
+    const pageText = await runInPage(tabId, getPageText, [MAX_PAGE_CHARS]);
+    if (!pageText.trim()) {
+      setStatus("This page has no text.");
+      return;
+    }
+
+    const citations = await findCitations(query, pageText);
+    if (search !== latestSearch) return;
+
+    const { found, missing } = await runInPage(tabId, highlightCitations, [citations]);
+    if (missing.length > 0) {
+      console.warn("coreText: citations not found on the page", missing);
+    }
+
+    matchCount = found;
+    searching = false;
+    if (found === 0) {
+      setStatus("Not found on this page.");
+      return;
+    }
+    await goToMatch(tabId, 0);
+  } catch (error) {
+    if (search !== latestSearch) return;
+    matchCount = 0;
+    // Chrome blocks injection on chrome:// pages and the Web Store.
+    setStatus(error instanceof Error ? error.message : "Could not search this page.");
+  } finally {
+    if (search === latestSearch) {
+      searching = false;
       updateCount();
     }
-  } catch (error) {
-    matchCount = 0;
-    currentIndex = -1;
-    updateCount();
-    setStatus(error instanceof Error ? error.message : "Could not read this page.");
   }
 }
 
 async function goToMatch(tabId: number, index: number): Promise<void> {
-  const [result] = await chrome.scripting.executeScript({
-    target: { tabId },
-    func: setActiveMatch,
-    args: [index],
-  });
-  currentIndex = result?.result ?? -1;
+  currentIndex = await runInPage(tabId, setActiveMatch, [index]);
   updateCount();
 }
 
-async function withActiveTab(callback: (tabId: number) => Promise<void>): Promise<void> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tab?.id === undefined) return;
-  await callback(tab.id);
+async function step(delta: number): Promise<void> {
+  if (matchCount === 0) return;
+  const tabId = await getActiveTabId();
+  if (tabId !== undefined) await goToMatch(tabId, currentIndex + delta);
 }
 
 input.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     void searchActivePage(input.value);
-    return;
-  }
-
-  if (matchCount === 0) return;
-
-  if (event.key === "ArrowDown") {
+  } else if (event.key === "ArrowDown") {
     event.preventDefault();
-    void withActiveTab((tabId) => goToMatch(tabId, currentIndex + 1));
+    void step(1);
   } else if (event.key === "ArrowUp") {
     event.preventDefault();
-    void withActiveTab((tabId) => goToMatch(tabId, currentIndex - 1));
+    void step(-1);
   }
 });
 
-prevButton.addEventListener("click", () => {
-  if (matchCount === 0) return;
-  void withActiveTab((tabId) => goToMatch(tabId, currentIndex - 1));
-});
-
-nextButton.addEventListener("click", () => {
-  if (matchCount === 0) return;
-  void withActiveTab((tabId) => goToMatch(tabId, currentIndex + 1));
-});
+prevButton.addEventListener("click", () => void step(-1));
+nextButton.addEventListener("click", () => void step(1));
 
 function pasteFromClipboard(): void {
   navigator.clipboard

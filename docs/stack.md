@@ -3,7 +3,7 @@
 ## Decisions
 - **No backend.** The Chrome extension calls the Gemini API directly.
 - **No RAG, no embeddings.** The whole page goes into the Gemini context.
-- **Ids, not quotes.** Gemini returns **sentence ids**, so every result maps to real text in the DOM and can always be highlighted.
+- **Citations + tolerant matching.** Gemini returns verbatim quotes from the page; the extension finds them in the DOM ignoring whitespace, case, quote/dash styles, and falls back to shorter pieces of a quote.
 
 ## Stack
 **Chrome extension, Manifest V3, TypeScript**
@@ -21,10 +21,11 @@ coreText/
 │   ├── manifest.json
 │   ├── popup.html
 │   ├── src/
-│   │   ├── gemini.ts       # Gemini client: askGemini / askGeminiJson
-│   │   ├── env.ts          # generated from .env (gitignored, contains the key!)
-│   │   ├── popup.ts
-│   │   └── printPage.ts
+│   │   ├── gemini.ts         # Gemini client: askGemini / askGeminiJson
+│   │   ├── semanticSearch.ts # search prompt: query + page text → citations
+│   │   ├── pageScripts.ts    # injected into the page: get text, highlight, navigate
+│   │   ├── popup.ts          # search box UI
+│   │   └── env.ts            # generated from .env (gitignored, contains the key!)
 │   └── dist/               # build output (gitignored, contains the key!)
 └── scripts/
     ├── writeEnv.mts        # .env → extension/src/env.ts, runs before build/watch
@@ -45,25 +46,22 @@ import { askGeminiJson } from "./gemini.js";
 
 ## Flow
 ```
-content.ts                               background.ts (service worker)
-──────────                               ──────────────────────────────
-collect sentences [{id, text}] + query
-        ── chrome.runtime.sendMessage ──►  fetch Gemini generateContent
-                                           (key from generated env.ts)
-                                           filter invalid ids
-highlight ids + scroll  ◄───────────────   { matches: [12, 13] }
+popup.ts                                         page (chrome.scripting.executeScript)
+────────                                         ─────────────────────────────────────
+Enter ─────────────────────────────────────────► getPageText(): document.body.innerText
+findCitations(query, pageText) → Gemini
+  { citations: ["Thus with a kiss I die.", …] }
+       ─────────────────────────────────────────► highlightCitations(citations)
+                                                   find each quote in text nodes → Range
+                                                   CSS.highlights (no DOM changes)
+↑ / ↓ ──────────────────────────────────────────► setActiveMatch(i): orange + scroll
 ```
 
-## Message contract
-```ts
-type Sentence = { id: number; text: string };
-
-type SearchMessage = { type: "search"; query: string; sentences: Sentence[] };
-
-type SearchResult =
-  | { matches: number[] }                  // [] = not found on this page
-  | { error: "api_error" };
-```
+## Files
+- `extension/src/gemini.ts`: generic Gemini client (`askGemini`, `askGeminiJson`)
+- `extension/src/semanticSearch.ts`: system prompt + `findCitations(query, pageText)`
+- `extension/src/pageScripts.ts`: functions injected into the page. Each one must be self-contained (Chrome serializes it): no imports, no outside helpers.
+- `extension/src/popup.ts`: search box, status, navigation
 
 ## Gemini call
 All Gemini requests go through `extension/src/gemini.ts`. Pass a system prompt, the input and any params:
@@ -71,15 +69,14 @@ All Gemini requests go through `extension/src/gemini.ts`. Pass a system prompt, 
 ```ts
 import { askGeminiJson } from "./gemini.js";
 
-const { matches } = await askGeminiJson<{ matches: number[] }>({
-  system: SEARCH_SYSTEM_PROMPT,          // rules: ids only, max 5, [] if nothing
-  user: `Query: ${query}\n\nSentences:\n${numbered}`,
+const { citations } = await askGeminiJson<{ citations: string[] }>({
+  system: SYSTEM_PROMPT,                 // verbatim quotes only, max 5, [] if nothing
+  user: `Search query: ${query}\n\nPage text:\n<<<\n${pageText}\n>>>`,
   schema: {
     type: "object",
-    properties: { matches: { type: "array", items: { type: "integer" } } },
-    required: ["matches"],
+    properties: { citations: { type: "array", items: { type: "string" } } },
+    required: ["citations"],
   },
-  temperature: 0,
   thinkingLevel: "low",                  // gemini-3.8-flash: low | medium | high
 });
 ```
@@ -87,24 +84,16 @@ const { matches } = await askGeminiJson<{ matches: number[] }>({
 Options: `system`, `user`, `schema`, `model`, `temperature`, `maxOutputTokens`, `thinkingLevel`, `signal`.
 Use `askGemini` (without a schema) for a plain text answer.
 
-Tested live: a Ukrainian query against English sentences returned `{"matches":[2]}` in ~2.7 s.
+Tested on the full text of Romeo and Juliet (~170k chars), ~2–3 s per query:
+- "romeo dies" → "Thy drugs are quick. Thus with a kiss I die."
+- a Ukrainian query "Juliet wakes up in the tomb" → the scene where Juliet wakes
+- "how to bake a cake" → no citations → "Not found on this page."
 
-## manifest.json: what to add for search
-```json
-{
-  "background": { "service_worker": "dist/background.js", "type": "module" },
-  "host_permissions": ["https://generativelanguage.googleapis.com/*"]
-}
-```
-
-## Why ids, not quotes
-Even with a strict prompt, an LLM can change a quote a little: whitespace, quote marks, dashes, trimming, fixing typos, or translating. Then the quote no longer matches the DOM and there is nothing to highlight.
-With ids:
-- a highlight always maps to real text
-- the response is shorter and faster
-- invented ids are easy to filter out
-
-Trade-off: we highlight whole sentences, not exact fragments.
+## Why tolerant matching
+Even with a strict prompt, an LLM can change a quote a little: whitespace, line breaks, quote marks, dashes, a skipped line. An exact search would then find nothing. So the page script:
+1. builds one normalized string from all text nodes (no whitespace, lowercase, unified quotes/dashes) with a map back to each node and offset;
+2. searches the normalized quote; quotes spanning several elements still match;
+3. if not found, retries with fewer words from the start or the end (down to half of the quote).
 
 ## API key
 - The key lives in `.env`. Before each build `scripts/writeEnv.mts` writes it into `extension/src/env.ts`.
@@ -112,9 +101,7 @@ Trade-off: we highlight whole sentences, not exact fragments.
 - Fine for the MVP. For production: a thin proxy server that holds the key.
 
 ## Notes
-- Call Gemini from `background.ts`, not from the content script (avoids page CSP/CORS issues).
-- In `onMessage`, return `true` to keep `sendResponse` alive for the async call.
-- Filter returned ids against the ids that were sent.
-- Cap page text (e.g. ~200k chars) for huge pages.
-- Show a spinner: a long page can take 2–6 s.
+- Page text is capped at 400k chars (`MAX_PAGE_CHARS`).
+- The Gemini request runs in the popup: closing the popup cancels a search in progress.
+- Citations that could not be located are logged with `console.warn` in the popup DevTools.
 - Highlight with the CSS Custom Highlight API (does not change the DOM).

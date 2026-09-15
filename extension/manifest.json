@@ -2,12 +2,13 @@
   "manifest_version": 3,
   "name": "coreText",
   "version": "0.1.0",
-  "description": "Print the current page to the browser console.",
+  "description": "Ctrl+F by meaning: find passages on the page with Gemini.",
   "action": {
     "default_popup": "popup.html",
     "default_title": "coreText"
   },
   "permissions": ["activeTab", "scripting", "clipboardRead"],
+  "host_permissions": ["https://generativelanguage.googleapis.com/*"],
   "commands": {
     "_execute_action": {
       "suggested_key": {

@@ -3,7 +3,7 @@
     "target": "ES2022",
     "module": "ES2020",
     "moduleResolution": "node",
-    "lib": ["ES2022", "DOM"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["chrome"],
     "rootDir": "extension/src",
     "outDir": "extension/dist",
