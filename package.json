@@ -4,7 +4,9 @@
   "private": true,
   "description": "Chrome extension that prints the current page to the console.",
   "scripts": {
+    "prebuild": "node scripts/writeEnv.mts",
     "build": "tsc",
+    "prewatch": "node scripts/writeEnv.mts",
     "watch": "tsc --watch",
     "typecheck:scripts": "tsc -p scripts",
     "gemini": "node scripts/testGemini.mts"
