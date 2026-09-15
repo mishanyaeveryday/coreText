@@ -1,0 +1,14 @@
+{
+  "name": "coretext",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Chrome extension that prints the current page to the console.",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.287",
+    "typescript": "^5.7.2"
+  }
+}

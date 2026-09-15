@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2020",
+    "moduleResolution": "node",
+    "lib": ["ES2022", "DOM"],
+    "types": ["chrome"],
+    "rootDir": "extension/src",
+    "outDir": "extension/dist",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noEmitOnError": true
+  },
+  "include": ["extension/src"]
+}
