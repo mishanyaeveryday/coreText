@@ -1,7 +1,10 @@
+import { FileSearchStage, searchLargeText } from "./fileSearch.js";
 import { askGeminiJson } from "./gemini.js";
 
-/** Longer pages are cut to keep requests fast (~100k tokens). */
+/** Pages up to this size go straight into the prompt; longer pages use File Search. */
 export const MAX_PAGE_CHARS = 400_000;
+/** Hard cap for File Search uploads (the API accepts files up to 100 MB). */
+export const MAX_FILE_SEARCH_CHARS = 20_000_000;
 /** Upper limit only: Gemini returns as many citations as are actually relevant. */
 export const MAX_CITATIONS = 50;
 
@@ -11,10 +14,9 @@ export const MAX_CITATIONS = 50;
  */
 export type SearchOrder = "appearance" | "importance";
 
-const SYSTEM_PROMPT = `You are a semantic search engine for a web page: Ctrl+F that understands meaning.
+export type SearchStage = FileSearchStage;
 
-You receive the text of a page and a search query.
-The query describes what the user is looking for. It can be a paraphrase, a question,
+const QUERY_RULES = `The query describes what the user is looking for. It can be a paraphrase, a question,
 a short description of an event, or written in another language.
 Find the passages of the page that match the query by meaning.
 
@@ -42,6 +44,18 @@ How to write citations:
   Never join text from different places, never use "...", never return the same passage twice.
 - If nothing on the page matches, return an empty list. Do not guess.`;
 
+const SYSTEM_PROMPT = `You are a semantic search engine for a web page: Ctrl+F that understands meaning.
+
+You receive the text of a page and a search query.
+${QUERY_RULES}`;
+
+const FILE_SEARCH_SYSTEM_PROMPT = `You are a semantic search engine for a very long web page: Ctrl+F that understands meaning.
+
+You receive a search query. The text of the page is not in the prompt: it is indexed in the file search tool.
+Use the file search tool at most 3 times, with different phrasings of the query, then answer.
+Treat the indexed document as the page text.
+${QUERY_RULES}`;
+
 const SCHEMA = {
   type: "object",
   properties: {
@@ -55,14 +69,35 @@ const SCHEMA = {
   required: ["citations"],
 };
 
-/** Asks Gemini for verbatim quotes from the page that match the query, best match first. */
-export async function findCitations(query: string, pageText: string): Promise<string[]> {
+function cleanCitations(citations: string[]): string[] {
+  return [...new Set(citations.map((citation) => citation.trim()).filter(Boolean))].slice(0, MAX_CITATIONS);
+}
+
+/**
+ * Asks Gemini for verbatim quotes from the page that match the query, best match first.
+ * Pages longer than MAX_PAGE_CHARS are searched with Gemini File Search, indexed once per tab;
+ * `onStage` reports its slower steps so the popup can show progress.
+ */
+export async function findCitations(
+  query: string,
+  pageText: string,
+  options: { tabId: number; onStage?: (stage: SearchStage) => void },
+): Promise<string[]> {
+  if (pageText.length > MAX_PAGE_CHARS) {
+    const answer = await searchLargeText(
+      options.tabId,
+      pageText.slice(0, MAX_FILE_SEARCH_CHARS),
+      { system: FILE_SEARCH_SYSTEM_PROMPT, input: `Search query: ${query}`, schema: SCHEMA },
+      options.onStage,
+    );
+    return cleanCitations((JSON.parse(answer) as { citations: string[] }).citations);
+  }
+
   const { citations } = await askGeminiJson<{ citations: string[] }>({
     system: SYSTEM_PROMPT,
-    user: `Search query: ${query}\n\nPage text:\n<<<\n${pageText.slice(0, MAX_PAGE_CHARS)}\n>>>`,
+    user: `Search query: ${query}\n\nPage text:\n<<<\n${pageText}\n>>>`,
     schema: SCHEMA,
     thinkingLevel: "low",
   });
-
-  return [...new Set(citations.map((citation) => citation.trim()).filter(Boolean))].slice(0, MAX_CITATIONS);
+  return cleanCitations(citations);
 }

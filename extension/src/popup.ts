@@ -5,7 +5,13 @@ import {
   reorderPageMatches,
   setActiveMatch,
 } from "./pageScripts.js";
-import { MAX_PAGE_CHARS, SearchOrder, findCitations } from "./semanticSearch.js";
+import { deleteUnusedStores } from "./fileSearch.js";
+import { MAX_FILE_SEARCH_CHARS, SearchOrder, SearchStage, findCitations } from "./semanticSearch.js";
+
+const STAGE_MESSAGES: Record<SearchStage, string> = {
+  indexing: "Long page: indexing it with Gemini File Search (about 30 s, only the first search)…",
+  searching: "Searching the indexed page…",
+};
 
 const input = document.querySelector<HTMLInputElement>("#search")!;
 const clearBtn = document.querySelector<HTMLButtonElement>("#clear-btn")!;
@@ -63,8 +69,10 @@ function updateCount(): void {
   updateActiveItemInList();
 }
 
-function setStatus(message: string): void {
+/** `info` is for progress messages, the default style is for errors and "not found". */
+function setStatus(message: string, kind: "error" | "info" = "error"): void {
   status.textContent = message;
+  status.classList.toggle("info", kind === "info");
   status.style.display = message ? "block" : "none";
 }
 
@@ -181,14 +189,20 @@ async function searchActivePage(rawQuery: string): Promise<void> {
     await runInPage(tabId, clearHighlights, []);
     if (!query) return;
 
-    const pageText = await runInPage(tabId, getPageText, [MAX_PAGE_CHARS]);
+    const pageText = await runInPage(tabId, getPageText, [MAX_FILE_SEARCH_CHARS]);
     if (!pageText.trim()) {
       setStatus("This page has no text.");
       return;
     }
 
-    const citations = await findCitations(query, pageText);
+    const citations = await findCitations(query, pageText, {
+      tabId,
+      onStage: (stage) => {
+        if (search === latestSearch) setStatus(STAGE_MESSAGES[stage], "info");
+      },
+    });
     if (search !== latestSearch) return;
+    setStatus("");
 
     const { found, missing, citationsInOrder } = await runInPage(tabId, highlightCitations, [
       citations,
@@ -305,3 +319,8 @@ if (document.hasFocus()) {
 
 updateOrderButtons();
 updateCount();
+
+// Remove File Search stores that no open tab uses anymore.
+deleteUnusedStores().catch((error) => {
+  console.warn("coreText: could not clean up File Search stores", error);
+});
