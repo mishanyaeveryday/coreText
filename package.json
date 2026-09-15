@@ -5,10 +5,13 @@
   "description": "Chrome extension that prints the current page to the console.",
   "scripts": {
     "build": "tsc",
-    "watch": "tsc --watch"
+    "watch": "tsc --watch",
+    "typecheck:scripts": "tsc -p scripts",
+    "gemini": "node scripts/testGemini.mts"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.287",
+    "@types/node": "^22.10.2",
     "typescript": "^5.7.2"
   }
 }
