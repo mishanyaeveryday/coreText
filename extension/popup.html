@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>coreText</title>
+    <style>
+      body {
+        width: 220px;
+        margin: 0;
+        padding: 12px;
+        font: 14px system-ui, sans-serif;
+      }
+      button {
+        width: 100%;
+        padding: 8px;
+        font: inherit;
+        cursor: pointer;
+      }
+      #status {
+        margin: 8px 0 0;
+        min-height: 1em;
+        color: #555;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <button id="print" type="button">Print</button>
+    <p id="status"></p>
+    <script type="module" src="dist/popup.js"></script>
+  </body>
+</html>
