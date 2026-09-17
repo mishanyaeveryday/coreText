@@ -45,7 +45,7 @@ The extension highlights the passage, even though the text never uses the words 
 
 ## Minimal flow
 ```
-User query → extension collects sentences from the page
-           → backend: multilingual embeddings → top matches (+ threshold)
-           → extension highlights matching sentences + scrolls
+User query → extension collects numbered sentences from the page
+           → backend: whole page + query → Gemini → ids of matching sentences
+           → extension highlights sentences by id + scrolls
 ```
